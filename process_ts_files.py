@@ -4,6 +4,7 @@ import subprocess
 import cv2
 from ultralytics import YOLO
 import m3u8
+import datetime
 
 PROCESS_TS_PATH = os.path.expanduser('~/codes/s3bucket/industrial-cctv-input')
 PROCESSED_TS_PATH = os.path.expanduser('~/codes/s3bucket/industrial-cctv-output')
@@ -12,6 +13,9 @@ M3U8_FILENAME = os.path.join(PROCESSED_TS_PATH, 'playlist.m3u8')
 MODEL_PATHS = ['best.pt', 'v4_nano_results.pt']
 TARGET_CLASSES = ['Person', 'Fallperson', 'Walkwithphone', 'Safetyhat', 'Fire']
 CONFIDENCE_THRESHOLD = 0.3
+
+def get_timestamp():
+    return datetime.datetime.now().strftime('%Y%m%d%H%M%S')
 
 def detect_and_save_video(video_path, output_path, tmp_path, model_paths, target_classes, confidence_threshold=0.3):
     models = [YOLO(model_path).to('cuda') for model_path in model_paths]
@@ -27,7 +31,8 @@ def detect_and_save_video(video_path, output_path, tmp_path, model_paths, target
         return
 
     temp_output_video_path = os.path.join(tmp_path, "temp_output_video.mp4")
-    final_output_video_path = os.path.join(output_path, os.path.basename(video_path).replace('.ts', '-processed.ts'))
+    timestamp = get_timestamp()
+    final_output_video_path = os.path.join(output_path, f'{timestamp}-processed.ts')
     video_writer = cv2.VideoWriter(temp_output_video_path, fourcc, fps, (width, height))
 
     while cap.isOpened():
