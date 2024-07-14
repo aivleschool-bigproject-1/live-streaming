@@ -5,6 +5,7 @@ import cv2
 from ultralytics import YOLO
 import m3u8
 import datetime
+from concurrent.futures import ThreadPoolExecutor
 
 PROCESS_TS_PATH = os.path.expanduser('~/codes/s3bucket/industrial-cctv-input')
 PROCESSED_TS_PATH = os.path.expanduser('~/codes/s3bucket/industrial-cctv-output')
@@ -17,13 +18,32 @@ CONFIDENCE_THRESHOLD = 0.3
 def get_timestamp():
     return datetime.datetime.now().strftime('%Y%m%d%H%M%S')
 
-def detect_and_save_video(video_path, output_path, tmp_path, model_paths, target_classes, confidence_threshold=0.3):
-    models = [YOLO(model_path).to('cuda') for model_path in model_paths]
-    
+def load_model(model_path):
+    model = YOLO(model_path).to('cuda')
+    return model
+
+def predict_model(frame, model, target_classes, confidence_threshold):
+    results = model.predict(frame)
+
+    output = []
+    for result in results[0].boxes:
+        cls = int(result.cls[0])
+        conf = result.conf[0]
+        if model.names[cls] in target_classes and conf >= confidence_threshold:
+            box = result.xyxy[0].cpu().numpy()
+            x1, y1, x2, y2 = map(int, box)
+            label = f"{model.names[cls]}: {conf:.2f}"
+            output.append((x1, y1, x2, y2, label))
+
+    return output
+
+def detect_and_save_video(video_path, output_path, tmp_path, models, target_classes, confidence_threshold=0.3):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    video_length = total_frames / fps if fps > 0 else 0
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 
     if not cap.isOpened():
@@ -35,28 +55,24 @@ def detect_and_save_video(video_path, output_path, tmp_path, model_paths, target
     final_output_video_path = os.path.join(output_path, f'{timestamp}-processed.ts')
     video_writer = cv2.VideoWriter(temp_output_video_path, fourcc, fps, (width, height))
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+    with ThreadPoolExecutor(max_workers=len(models)) as executor:
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        for model in models:
-            results = model.predict(frame)
+            futures = [executor.submit(predict_model, frame, model, target_classes, confidence_threshold) for model in models]
 
-            for result in results[0].boxes:
-                cls = int(result.cls[0])
-                conf = result.conf[0]
-                if model.names[cls] in target_classes and conf >= confidence_threshold:
-                    box = result.xyxy[0].cpu().numpy()
-                    x1, y1, x2, y2 = map(int, box)
-                    label = f"{model.names[cls]}: {conf:.2f}"
+            for i, future in enumerate(futures):
+                outputs = future.result()
+                for (x1, y1, x2, y2, label) in outputs:
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     label_size, base_line = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
                     label_ymin = max(y1, label_size[1] + 10)
                     cv2.rectangle(frame, (x1, label_ymin - label_size[1] - 10), (x1 + label_size[0], label_ymin + base_line - 10), (0, 255, 0), cv2.FILLED)
                     cv2.putText(frame, label, (x1, label_ymin - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
 
-        video_writer.write(frame)
+            video_writer.write(frame)
 
     video_writer.release()
     cap.release()
@@ -71,7 +87,6 @@ def detect_and_save_video(video_path, output_path, tmp_path, model_paths, target
     ]
     subprocess.run(convert_command, check=True)
     os.remove(temp_output_video_path)
-    print("Processing complete. Video saved as:", final_output_video_path)
 
 def get_next_file_to_process(process_path):
     files = [f for f in os.listdir(process_path) if f.endswith('.ts')]
@@ -86,7 +101,7 @@ def maintain_max_files(directory, max_files):
         print(f"Deleted old file to maintain max files: {files[0]}")
 
 def update_m3u8(directory, m3u8_filename):
-     # Get all .ts files in the directory
+    # Get all .ts files in the directory
     ts_files = [f for f in os.listdir(directory) if f.endswith('.ts')]
     
     # Sort files by creation time
@@ -118,11 +133,13 @@ def update_m3u8(directory, m3u8_filename):
     print(f"M3U8 file updated: {m3u8_filename}")
 
 def main():
+    models = [load_model(model_path) for model_path in MODEL_PATHS]
+
     while True:
         next_file = get_next_file_to_process(PROCESS_TS_PATH)
         if next_file:
             video_path = os.path.join(PROCESS_TS_PATH, next_file)
-            detect_and_save_video(video_path, PROCESSED_TS_PATH, TEMP_OUTPUT_PATH, MODEL_PATHS, TARGET_CLASSES, CONFIDENCE_THRESHOLD)
+            detect_and_save_video(video_path, PROCESSED_TS_PATH, TEMP_OUTPUT_PATH, models, TARGET_CLASSES, CONFIDENCE_THRESHOLD)
             os.remove(video_path)  # Remove the processed file
 
             maintain_max_files(PROCESSED_TS_PATH, 30)
