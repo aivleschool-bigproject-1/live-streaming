@@ -58,7 +58,7 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
     final_output_video_path = os.path.join(output_path, f'{timestamp}-processed.ts')
     video_writer = cv2.VideoWriter(temp_output_video_path, fourcc, fps, (width, height))
 
-    json_output_path = os.path.join(output_path, f'{timestamp}-detection-counts.json')
+    json_output_path = os.path.join(tmp_path, f'{timestamp}-detection-counts.json')
     detection_counts = []
 
     video_start_time = get_file_creation_time(video_path)
@@ -128,7 +128,6 @@ def maintain_max_files(directory, max_files):
     files.sort(key=os.path.getctime)
     while len(files) > max_files:
         os.remove(files.pop(0))
-        print(f"Deleted old file to maintain max files: {files[0]}")
 
 def update_m3u8(directory, m3u8_filename):
     ts_files = [f for f in os.listdir(directory) if f.endswith('.ts')]
@@ -152,7 +151,6 @@ def update_m3u8(directory, m3u8_filename):
 
     with open(m3u8_filename, 'w') as f:
         f.write(playlist_content)
-    print(f"M3U8 file updated: {m3u8_filename}")
 
 def main(config_path):
     with open(config_path, 'r') as config_file:
