@@ -1,0 +1,5 @@
+{
+    "process_ts_path": "~/codes/s3bucket/industrial-cctv-input",
+    "processed_ts_path": "~/codes/s3bucket/industrial-cctv-output",
+    "target_classes": ["Person", "Fallperson", "Walkwithphone", "Safetyhat", "Fire"]
+}
