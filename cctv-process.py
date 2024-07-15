@@ -40,6 +40,14 @@ def predict_model(frame, model, target_classes, confidence_threshold):
 
     return output, class_counts
 
+def draw_bounding_boxes(frame, outputs):
+    for (x1, y1, x2, y2, label) in outputs:
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        label_size, base_line = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        label_ymin = max(y1, label_size[1] + 10)
+        cv2.rectangle(frame, (x1, label_ymin - label_size[1] - 10), (x1 + label_size[0], label_ymin + base_line - 10), (0, 255, 0), cv2.FILLED)
+        cv2.putText(frame, label, (x1, label_ymin - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+
 def detect_and_save_video(video_path, output_path, tmp_path, models, target_classes, config_name, confidence_threshold=0.3):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -63,38 +71,45 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
 
     video_start_time = get_file_creation_time(video_path)
 
+    frame_count = 0
+    json_frame_count = 1  # Initialize JSON frame count
+    previous_outputs = []
+    previous_class_counts = {cls: 0 for cls in target_classes}
+
     with ThreadPoolExecutor(max_workers=len(models)) as executor:
-        frame_count = 0
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
 
-            futures = [executor.submit(predict_model, frame, model, target_classes, confidence_threshold) for model in models]
+            if frame_count % 2 == 0:  # Process every second frame
+                futures = [executor.submit(predict_model, frame, model, target_classes, confidence_threshold) for model in models]
+                frame_detections = []
+                frame_class_counts = {cls: 0 for cls in target_classes}
+                for i, future in enumerate(futures):
+                    outputs, class_counts = future.result()
+                    frame_detections.extend(outputs)
+                    for cls, count in class_counts.items():
+                        frame_class_counts[cls] += count
+                previous_outputs = frame_detections
+                previous_class_counts = frame_class_counts
 
-            frame_detections = []
-            frame_class_counts = {cls: 0 for cls in target_classes}
-            for i, future in enumerate(futures):
-                outputs, class_counts = future.result()
-                frame_detections.extend(outputs)
-                for cls, count in class_counts.items():
-                    frame_class_counts[cls] += count
-                for (x1, y1, x2, y2, label) in outputs:
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    label_size, base_line = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                    label_ymin = max(y1, label_size[1] + 10)
-                    cv2.rectangle(frame, (x1, label_ymin - label_size[1] - 10), (x1 + label_size[0], label_ymin + base_line - 10), (0, 255, 0), cv2.FILLED)
-                    cv2.putText(frame, label, (x1, label_ymin - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+                frame_timestamp = video_start_time + datetime.timedelta(seconds=(frame_count / fps))
+                detection_counts.append({
+                    'frame': json_frame_count,
+                    'timestamp': frame_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                    'detections': frame_class_counts
+                })
+                json_frame_count += 1  # Increment JSON frame count
+            else:
+                frame_detections = previous_outputs
+                frame_class_counts = previous_class_counts
 
-            frame_timestamp = video_start_time + datetime.timedelta(seconds=(frame_count / fps))
-            detection_counts.append({
-                'frame': frame_count,
-                'timestamp': frame_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                'detections': frame_class_counts
-                # 'raw_frame': frame.tolist()  # 프레임 데이터를 리스트로 변환하여 추가 (필요한 경우에 사용)
-            })
-            frame_count += 1
+            if frame_detections:
+                draw_bounding_boxes(frame, frame_detections)
+
             video_writer.write(frame)
+            frame_count += 1
 
     with open(json_output_path, 'w') as json_file:
         json.dump(detection_counts, json_file, indent=4)
@@ -114,7 +129,6 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
     os.remove(temp_output_video_path)
 
 def get_file_creation_time(file_path):
-    # This function gets the file creation time and converts it to KST
     creation_time = datetime.datetime.fromtimestamp(os.path.getctime(file_path))
     return creation_time.astimezone(pytz.timezone('Asia/Seoul'))
 
