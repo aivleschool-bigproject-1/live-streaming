@@ -11,8 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytz
 
 TEMP_OUTPUT_PATH = os.path.expanduser('~/codes/ts-processed')
-MODEL_PATHS = ['best.pt', 'v4_nano_results.pt']
-CONFIDENCE_THRESHOLD = 0.3
+MODEL_PATHS = ['fire_seg_results.pt', 'v8_nano_results.pt']
 
 def get_timestamp():
     kst = pytz.timezone('Asia/Seoul')
@@ -20,25 +19,30 @@ def get_timestamp():
 
 def load_model(model_path):
     model = YOLO(model_path).to('cuda')
-    return model
+    return {'model': model, 'path': model_path}
 
 def predict_model(frame, model, target_classes, confidence_threshold):
-    results = model.predict(frame)
-
+    results = model['model'].predict(frame)
     output = []
     class_counts = {cls: 0 for cls in target_classes}
+    segmentation_masks = []
+
     for result in results[0].boxes:
         cls = int(result.cls[0])
         conf = result.conf[0]
-        class_name = model.names[cls]
+        class_name = model['model'].names[cls]
         if class_name in target_classes and conf >= confidence_threshold:
             box = result.xyxy[0].cpu().numpy()
             x1, y1, x2, y2 = map(int, box)
             label = f"{class_name}: {conf:.2f}"
             output.append((x1, y1, x2, y2, label))
             class_counts[class_name] += 1
+    
+    if 'fire_seg_results.pt' in model['path']:
+        if results[0].masks:
+            segmentation_masks = results[0].masks.xy
 
-    return output, class_counts
+    return output, class_counts, segmentation_masks
 
 def draw_bounding_boxes(frame, outputs):
     for (x1, y1, x2, y2, label) in outputs:
@@ -48,7 +52,14 @@ def draw_bounding_boxes(frame, outputs):
         cv2.rectangle(frame, (x1, label_ymin - label_size[1] - 10), (x1 + label_size[0], label_ymin + base_line - 10), (0, 255, 0), cv2.FILLED)
         cv2.putText(frame, label, (x1, label_ymin - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
 
-def detect_and_save_video(video_path, output_path, tmp_path, models, target_classes, config, confidence_threshold=0.3):
+def draw_segmentation(frame, outputs, masks):
+    draw_bounding_boxes(frame, outputs)
+    for mask in masks:
+        for m in mask:
+            m = m.astype(int)
+            frame[m[1], m[0]] = [255, 0, 255]
+
+def detect_and_save_video(video_path, output_path, tmp_path, models, target_classes, config):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -83,14 +94,23 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
                 break
 
             if frame_count % 2 == 0:  # Process every second frame
-                futures = [executor.submit(predict_model, frame, model, target_classes, confidence_threshold) for model in models]
+                futures = []
+                for model in models:
+                    if 'fire_seg_results.pt' in model['path']:
+                        futures.append(executor.submit(predict_model, frame, model, target_classes, 0.3))
+                    else:
+                        futures.append(executor.submit(predict_model, frame, model, target_classes, 0.65))
+                        
                 frame_detections = []
                 frame_class_counts = {cls: 0 for cls in target_classes}
+                segmentation_masks = []
                 for i, future in enumerate(futures):
-                    outputs, class_counts = future.result()
+                    outputs, class_counts, masks = future.result()
                     frame_detections.extend(outputs)
                     for cls, count in class_counts.items():
                         frame_class_counts[cls] += count
+                    if masks:
+                        segmentation_masks.extend(masks)
                 previous_outputs = frame_detections
                 previous_class_counts = frame_class_counts
 
@@ -107,7 +127,10 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
                 frame_class_counts = previous_class_counts
 
             if frame_detections:
-                draw_bounding_boxes(frame, frame_detections)
+                if 'fire_seg_results.pt' in models[0]['path']:
+                    draw_segmentation(frame, frame_detections, segmentation_masks)
+                else:
+                    draw_bounding_boxes(frame, frame_detections)
 
             video_writer.write(frame)
             frame_count += 1
@@ -184,7 +207,7 @@ def main(config_path):
         next_file = get_next_file_to_process(process_ts_path)
         if next_file:
             video_path = os.path.join(process_ts_path, next_file)
-            detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, models, target_classes, config, CONFIDENCE_THRESHOLD)
+            detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, models, target_classes, config)
             os.remove(video_path)  # Remove the processed file
 
             maintain_max_files(processed_ts_path, 30)
