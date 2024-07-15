@@ -9,6 +9,7 @@ import json
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import pytz
+import numpy as np
 
 TEMP_OUTPUT_PATH = os.path.expanduser('~/codes/ts-processed')
 MODEL_PATHS = ['fire_seg_results.pt', 'v8_nano_results.pt']
@@ -54,10 +55,12 @@ def draw_bounding_boxes(frame, outputs):
 
 def draw_segmentation(frame, outputs, masks):
     draw_bounding_boxes(frame, outputs)
+    height, width = frame.shape[:2]
     for mask in masks:
         for m in mask:
             m = m.astype(int)
-            frame[m[1], m[0]] = [255, 0, 255]
+            if 0 <= m[1] < height and 0 <= m[0] < width:
+                frame[m[1], m[0]] = [255, 0, 255]
 
 def detect_and_save_video(video_path, output_path, tmp_path, models, target_classes, config):
     cap = cv2.VideoCapture(video_path)
