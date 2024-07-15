@@ -115,12 +115,14 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
                 previous_class_counts = frame_class_counts
 
                 frame_timestamp = video_start_time + datetime.timedelta(seconds=(frame_count / fps))
-                detection_counts.append({
+                detection_info = {
                     'frame': json_frame_count,
                     'timestamp': frame_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                    'detections': frame_class_counts,
-                    'min_required_personnel': config['min_required_personnel']
-                })
+                    'detections': frame_class_counts
+                }
+                if config['config_name'] == 'industrial_config':
+                    detection_info['min_required_personnel'] = config['min_required_personnel']
+                detection_counts.append(detection_info)
                 json_frame_count += 1  # Increment JSON frame count
             else:
                 frame_detections = previous_outputs
