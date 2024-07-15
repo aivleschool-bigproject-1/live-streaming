@@ -48,7 +48,7 @@ def draw_bounding_boxes(frame, outputs):
         cv2.rectangle(frame, (x1, label_ymin - label_size[1] - 10), (x1 + label_size[0], label_ymin + base_line - 10), (0, 255, 0), cv2.FILLED)
         cv2.putText(frame, label, (x1, label_ymin - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
 
-def detect_and_save_video(video_path, output_path, tmp_path, models, target_classes, config_name, confidence_threshold=0.3):
+def detect_and_save_video(video_path, output_path, tmp_path, models, target_classes, config, confidence_threshold=0.3):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -61,7 +61,7 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
         print("Error opening video file")
         return
 
-    temp_output_video_path = os.path.join(tmp_path, f"{config_name}_temp_video.mp4")
+    temp_output_video_path = os.path.join(tmp_path, f"{config['config_name']}_temp_video.mp4")
     timestamp = get_timestamp()
     final_output_video_path = os.path.join(output_path, f'{timestamp}-processed.ts')
     video_writer = cv2.VideoWriter(temp_output_video_path, fourcc, fps, (width, height))
@@ -98,7 +98,8 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
                 detection_counts.append({
                     'frame': json_frame_count,
                     'timestamp': frame_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                    'detections': frame_class_counts
+                    'detections': frame_class_counts,
+                    'min_required_personnel': config['min_required_personnel']
                 })
                 json_frame_count += 1  # Increment JSON frame count
             else:
@@ -175,7 +176,7 @@ def main(config_path):
     target_classes = config['target_classes']
     m3u8_filename = os.path.join(processed_ts_path, 'playlist.m3u8')
 
-    config_name = os.path.splitext(os.path.basename(config_path))[0]
+    config['config_name'] = os.path.splitext(os.path.basename(config_path))[0]
 
     models = [load_model(model_path) for model_path in MODEL_PATHS]
 
@@ -183,7 +184,7 @@ def main(config_path):
         next_file = get_next_file_to_process(process_ts_path)
         if next_file:
             video_path = os.path.join(process_ts_path, next_file)
-            detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, models, target_classes, config_name, CONFIDENCE_THRESHOLD)
+            detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, models, target_classes, config, CONFIDENCE_THRESHOLD)
             os.remove(video_path)  # Remove the processed file
 
             maintain_max_files(processed_ts_path, 30)
