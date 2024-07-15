@@ -1,0 +1,4 @@
+{
+    "process_ts_path": "~/codes/s3bucket/facecam-input",
+    "processed_ts_path": "~/codes/s3bucket/facecam-output"
+}
