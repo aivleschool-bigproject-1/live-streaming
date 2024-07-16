@@ -3,16 +3,19 @@ import time
 import subprocess
 import cv2
 from ultralytics import YOLO
-import m3u8
 import datetime
 import json
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import pytz
 import numpy as np
+import requests
+from requests.auth import HTTPBasicAuth
 
 TEMP_OUTPUT_PATH = os.path.expanduser('~/codes/ts-processed')
 MODEL_PATHS = ['fire_seg_results.pt', 'v8_nano_results.pt']
+
+MAX_BULK_SIZE = 90 * 1024 * 1024  # 100MB
 
 def get_timestamp():
     kst = pytz.timezone('Asia/Seoul')
@@ -80,15 +83,15 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
     final_output_video_path = os.path.join(output_path, f'{timestamp}-processed.ts')
     video_writer = cv2.VideoWriter(temp_output_video_path, fourcc, fps, (width, height))
 
-    json_output_path = os.path.join(tmp_path, f'{timestamp}-detection-counts.json')
-    detection_counts = []
-
     video_start_time = get_file_creation_time(video_path)
 
     frame_count = 0
     json_frame_count = 1  # Initialize JSON frame count
     previous_outputs = []
     previous_class_counts = {cls: 0 for cls in target_classes}
+    bulk_data = ''
+    
+    es_index = 'industrial-cctv' if config['config_name'] == 'industrial_config' else 'office-cctv'
 
     with ThreadPoolExecutor(max_workers=len(models)) as executor:
         while cap.isOpened():
@@ -120,12 +123,21 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
                 frame_timestamp = video_start_time + datetime.timedelta(seconds=(frame_count / fps))
                 detection_info = {
                     'frame': json_frame_count,
-                    'timestamp': frame_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                    'timestamp': frame_timestamp.strftime('%Y-%m-%dT%H:%M:%S%z'),
                     'detections': frame_class_counts
                 }
                 if config['config_name'] == 'industrial_config':
                     detection_info['min_required_personnel'] = config['min_required_personnel']
-                detection_counts.append(detection_info)
+                
+                # Add to bulk data
+                bulk_data += json.dumps({"index": {"_index": es_index}}) + '\n'
+                bulk_data += json.dumps(detection_info) + '\n'
+
+                # Check if bulk_data size exceeds MAX_BULK_SIZE
+                if len(bulk_data.encode('utf-8')) > MAX_BULK_SIZE:
+                    send_bulk_to_elasticsearch(bulk_data, es_index)
+                    bulk_data = ''
+
                 json_frame_count += 1  # Increment JSON frame count
             else:
                 frame_detections = previous_outputs
@@ -140,8 +152,9 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
             video_writer.write(frame)
             frame_count += 1
 
-    with open(json_output_path, 'w') as json_file:
-        json.dump(detection_counts, json_file, indent=4)
+    # Send any remaining data in the buffer
+    if bulk_data:
+        send_bulk_to_elasticsearch(bulk_data, es_index)
 
     video_writer.release()
     cap.release()
@@ -195,6 +208,20 @@ def update_m3u8(directory, m3u8_filename):
     with open(m3u8_filename, 'w') as f:
         f.write(playlist_content)
 
+def send_bulk_to_elasticsearch(bulk_data, es_index):
+    url = f'http://3.35.141.3:9200/{es_index}/_bulk'
+    headers = {'Content-Type': 'application/x-ndjson'}
+    try:
+        response = requests.post(url, headers=headers, data=bulk_data, verify=False)
+        print("response:", response.status_code, response.text)
+    except requests.exceptions.SSLError as e:
+        print("SSL error:", e)
+    except requests.exceptions.ConnectionError as e:
+        print("Error connecting to Elasticsearch:", e)
+    except Exception as e:
+        print("An error occurred:", e)
+
+
 def main(config_path):
     with open(config_path, 'r') as config_file:
         config = json.load(config_file)
@@ -215,7 +242,7 @@ def main(config_path):
             detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, models, target_classes, config)
             os.remove(video_path)  # Remove the processed file
 
-            maintain_max_files(processed_ts_path, 30)
+            maintain_max_files(processed_ts_path, 15)
             update_m3u8(processed_ts_path, m3u8_filename)
         else:
             time.sleep(5)  # Wait for a short while before checking again
