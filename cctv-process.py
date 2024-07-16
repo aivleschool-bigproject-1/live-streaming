@@ -209,10 +209,14 @@ def update_m3u8(directory, m3u8_filename):
         f.write(playlist_content)
 
 def send_bulk_to_elasticsearch(bulk_data, es_index):
-    url = f'http://3.35.141.3:9200/{es_index}/_bulk'
+    url = f'https://ea86ace4539b432f84fc0f19c4c0c586.ap-northeast-2.aws.elastic-cloud.com/{es_index}/_bulk'
     headers = {'Content-Type': 'application/x-ndjson'}
+    # Elastic Cloud 사용자명과 비밀번호
+    username = 'elastic'
+    password = 'B8p8BRDeQ0FTCcEJFdR6Bf6U'
+
     try:
-        response = requests.post(url, headers=headers, data=bulk_data, verify=False)
+        response = requests.post(url, headers=headers, data=bulk_data, auth=HTTPBasicAuth(username, password))
         print("response:", response.status_code, response.text)
     except requests.exceptions.SSLError as e:
         print("SSL error:", e)
