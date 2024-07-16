@@ -26,7 +26,7 @@ def load_model(model_path):
     return {'model': model, 'path': model_path}
 
 def predict_model(frame, model, target_classes, confidence_threshold):
-    results = model['model'].predict(frame)
+    results = model['model'].predict(frame, verbose=False)
     output = []
     class_counts = {cls: 0 for cls in target_classes}
     segmentation_masks = []
