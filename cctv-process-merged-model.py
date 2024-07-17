@@ -139,6 +139,10 @@ def detect_and_save_video(video_path, output_path, tmp_path, model, target_class
     subprocess.run(convert_command, check=True)
     os.remove(temp_output_video_path)
 
+    # Use the calculated video length for EXTINF
+    ts_duration = video_length
+    config['extinf_max'] = update_m3u8(final_output_video_path, ts_duration, os.path.join(output_path, 'playlist.m3u8'), config['extinf_max'])
+
 def get_file_creation_time(file_path):
     creation_time = datetime.datetime.fromtimestamp(os.path.getctime(file_path))
     return creation_time.astimezone(pytz.timezone('Asia/Seoul'))
@@ -154,28 +158,41 @@ def maintain_max_files(directory, max_files):
     while len(files) > max_files:
         os.remove(files.pop(0))
 
-def update_m3u8(directory, m3u8_filename):
-    ts_files = [f for f in os.listdir(directory) if f.endswith('.ts')]
-    ts_files = sorted(ts_files, key=lambda f: os.path.getmtime(os.path.join(directory, f)))
+def update_m3u8(ts_file, ts_duration, m3u8_filename, extinf_max):
+    # Update the EXTINF max value
+    extinf_max = max(extinf_max, ts_duration)
+    target_duration = math.ceil(extinf_max)
 
-    playlist_header = [
-        '#EXTM3U',
-        '#EXT-X-VERSION:3',
-        '#EXT-X-TARGETDURATION:10',
-        '#EXT-X-MEDIA-SEQUENCE:0'
-    ]
+    # Extract the ts file name from the full path
+    ts_file_name = os.path.basename(ts_file)
 
-    playlist_segments = []
-    for ts_file in ts_files:
-        playlist_segments.append(f'#EXTINF:10,')
-        playlist_segments.append(ts_file)
+    # Read existing playlist
+    if os.path.exists(m3u8_filename):
+        with open(m3u8_filename, 'r') as f:
+            playlist_lines = f.readlines()
+    else:
+        playlist_lines = [
+            '#EXTM3U\n',
+            '#EXT-X-VERSION:3\n',
+            f'#EXT-X-TARGETDURATION:{target_duration}\n',
+            '#EXT-X-MEDIA-SEQUENCE:0\n'
+        ]
 
-    playlist_footer = ['#EXT-X-ENDLIST']
+    # Update TARGETDURATION in the header
+    for i, line in enumerate(playlist_lines):
+        if line.startswith('#EXT-X-TARGETDURATION'):
+            playlist_lines[i] = f'#EXT-X-TARGETDURATION:{target_duration}\n'
+            break
 
-    playlist_content = '\n'.join(playlist_header + playlist_segments + playlist_footer)
+    # Add the new segment
+    playlist_lines.append(f'#EXTINF:{ts_duration},\n')
+    playlist_lines.append(f'{ts_file_name}\n')
 
+    # Write updated playlist back to file
     with open(m3u8_filename, 'w') as f:
-        f.write(playlist_content)
+        f.writelines(playlist_lines)
+
+    return extinf_max
 
 def send_bulk_to_elasticsearch(bulk_data, es_index):
     url = f'https://ea86ace4539b432f84fc0f19c4c0c586.ap-northeast-2.aws.elastic-cloud.com/{es_index}/_bulk'
@@ -207,6 +224,9 @@ def main(config_path):
     config['config_name'] = os.path.splitext(os.path.basename(config_path))[0]
 
     model = load_model(MODEL_PATH)
+
+    # Initialize EXTINF max value
+    config['extinf_max'] = 0
 
     while True:
         next_file = get_next_file_to_process(process_ts_path)
