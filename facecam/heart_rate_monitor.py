@@ -10,14 +10,14 @@ import math
 import tensorflow as tf
 
 class HeartRateMonitor:
-    def __init__(self, buffer_size=150):
+    def __init__(self, buffer_size=150, bpm_buffer_size=300):
         self.detector = dlib.get_frontal_face_detector()
         self.predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
         self.buffer_size = buffer_size
         self.data_buffer = deque(maxlen=buffer_size)
         self.times = deque(maxlen=buffer_size)
         self.bpm = 0
-        self.bpm_values = deque(maxlen=buffer_size)
+        self.bpm_values = deque(maxlen=bpm_buffer_size)  # 최근 5분 동안의 심박수 데이터 버퍼
         self.t0 = time.time()
         self.initialized = False  # 버퍼 초기화 상태 확인
 
@@ -66,8 +66,6 @@ class HeartRateMonitor:
             green_mean = self.extract_green_channel_mean(roi)
 
             if green_mean is not None:
-                # if not self.initialized:
-                #     self.initialize_buffers(green_mean)  # 초기 버퍼 데이터 설정
                 for i in range(5):      # 버퍼와 시간 스킵한 프레임수만큼 추가
                     self.data_buffer.append(green_mean)
                     self.times.append(time.time() - self.t0)
@@ -114,6 +112,26 @@ class HeartRateMonitor:
         self.bpm = freqs[idx] * 60.0
         self.bpm_values.append(self.bpm)
 
+    def calculate_stress_index(self):
+        if len(self.bpm_values) < 2:
+            return 0.0  # 충분한 데이터가 없음
+
+        sum_squared_differences = 0.0
+        previous_bpm = self.bpm_values[0]
+
+        for current_bpm in list(self.bpm_values)[1:]:
+            difference = current_bpm - previous_bpm
+            sum_squared_differences += difference * difference
+            previous_bpm = current_bpm
+
+        rmssd = math.sqrt(sum_squared_differences / (len(self.bpm_values) - 1))
+        stress_index = (rmssd / 50) * 100
+        return max(0, min(100, stress_index))
+
+    def get_stress(self):
+        stress_index = self.calculate_stress_index()
+        return stress_index
+
     def get_heart_rate(self):
         return self.bpm
 
@@ -123,5 +141,12 @@ class HeartRateMonitor:
         text_x = frame.shape[1] - text_size[0] - 10
         text_y = 30
         cv2.putText(frame, bpm_text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        return frame
 
+        stress_index = self.calculate_stress_index()
+        stress_text = f'Stress: {stress_index:.2f}'
+        stress_text_size = cv2.getTextSize(stress_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+        stress_text_x = frame.shape[1] - stress_text_size[0] - 10
+        stress_text_y = text_y + 30
+        cv2.putText(frame, stress_text, (stress_text_x, stress_text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        return frame

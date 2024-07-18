@@ -40,10 +40,7 @@ def get_timestamp():
     return datetime.datetime.now(kst).strftime('%Y%m%d%H%M%S')
 
 def predict_heart_rate(frame, heart_rate_monitor):
-    start_time = time.time()
     heart_rate_monitor.run(frame)
-    end_time = time.time()
-    print(f"heartrate time: {end_time - start_time:.4f} seconds")
     return heart_rate_monitor.get_heart_rate()
 
 def predict_posture(frame, posture_monitor):
@@ -86,7 +83,7 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
     json_frame_count = 1
     bulk_data = ''
 
-    previous_outputs = None
+    previous_heart_rate = None
     previous_posture_result = None
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -94,8 +91,6 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
             ret, frame = cap.read()
             if not ret:
                 break
-
-            start_time = time.time()
 
             if frame_count % 3 == 0:
                 future_heart_rate = executor.submit(predict_heart_rate, frame, heart_rate_monitor)
@@ -107,10 +102,13 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
                 output_frame = draw_results(frame, posture_result, heart_rate_monitor)
 
                 frame_timestamp = video_start_time + datetime.timedelta(seconds=(frame_count / fps))
+                stress = heart_rate_monitor.get_stress()
+                print("streaa: ", stress)
                 detection_info = {
                     'frame': json_frame_count,
                     'timestamp': frame_timestamp.strftime('%Y-%m-%dT%H:%M:%S%z'),
                     'heart_rate': heart_rate,
+                    'stress': stress,  
                     'posture_status': posture_monitor.get_posture_status()
                 }
 
@@ -121,17 +119,16 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
                     send_bulk_to_elasticsearch(bulk_data, ES_INDEX)
                     bulk_data = ''
 
-                previous_outputs = heart_rate
+                previous_heart_rate = heart_rate
                 previous_posture_result = posture_result
                 json_frame_count += 1
             else:
-                output_frame = draw_results(frame, previous_posture_result, heart_rate_monitor)
+                if previous_posture_result is not None:
+                    output_frame = draw_results(frame, previous_posture_result, heart_rate_monitor)
+                else:
+                    output_frame = frame
 
             video_writer.write(output_frame)
-
-            end_time = time.time()
-            print(f"Frame {frame_count} processing time: {end_time - start_time:.4f} seconds")
-            print(" ")
 
             frame_count += 1
 
@@ -141,7 +138,6 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
     video_writer.release()
     cap.release()
 
-    convert_start_time = time.time()
     convert_command = [
         'ffmpeg',
         '-i', temp_output_video_path,
@@ -151,15 +147,11 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
         final_output_video_path
     ]
     subprocess.run(convert_command, check=True)
-    convert_end_time = time.time()
     os.remove(temp_output_video_path)
-    print(f"Video conversion time: {convert_end_time - convert_start_time:.4f} seconds")
-    print(" ")
 
     # Use the calculated video length for EXTINF
     ts_duration = video_length
     config['extinf_max'] = update_m3u8(final_output_video_path, ts_duration, os.path.join(output_path, 'playlist.m3u8'), config['extinf_max'])
-
 
 def get_file_creation_time(file_path):
     creation_time = datetime.datetime.fromtimestamp(os.path.getctime(file_path))
