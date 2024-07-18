@@ -10,16 +10,20 @@ import math
 import tensorflow as tf
 
 class HeartRateMonitor:
-    def __init__(self, buffer_size=150, bpm_buffer_size=300):
+    def __init__(self, buffer_size=150):
         self.detector = dlib.get_frontal_face_detector()
         self.predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
         self.buffer_size = buffer_size
         self.data_buffer = deque(maxlen=buffer_size)
         self.times = deque(maxlen=buffer_size)
         self.bpm = 0
-        self.bpm_values = deque(maxlen=bpm_buffer_size)  # 최근 5분 동안의 심박수 데이터 버퍼
         self.t0 = time.time()
         self.initialized = False  # 버퍼 초기화 상태 확인
+
+        # 스트레스 지수 계산용 데이터
+        self.bpm_values_count = 0
+        self.sum_squared_differences = 0.0
+        self.previous_bpm_value = None
 
         # GPU 설정
         self.device = '/GPU:0' if tf.config.list_physical_devices('GPU') else '/CPU:0'
@@ -110,28 +114,31 @@ class HeartRateMonitor:
         freqs = np.fft.rfftfreq(len(filtered), 1.0/fs)
         idx = np.argmax(fft)
         self.bpm = freqs[idx] * 60.0
-        self.bpm_values.append(self.bpm)
+        self.bpm_values_count += 1
 
     def calculate_stress_index(self):
-        if len(self.bpm_values) < 2:
-            return 0.0  # 충분한 데이터가 없음
+        # 심박수 2개부터 계산
+        if self.bpm_values_count < 2:
+            self.previous_bpm_value = self.bpm
+            return 0.0
+        
+        difference = self.bpm - self.previous_bpm_value
+        self.sum_squared_differences += difference * difference
+        self.previous_bpm_value = self.bpm
 
-        sum_squared_differences = 0.0
-        previous_bpm = self.bpm_values[0]
-
-        for current_bpm in list(self.bpm_values)[1:]:
-            difference = current_bpm - previous_bpm
-            sum_squared_differences += difference * difference
-            previous_bpm = current_bpm
-
-        rmssd = math.sqrt(sum_squared_differences / (len(self.bpm_values) - 1))
+        rmssd = math.sqrt(self.sum_squared_differences / (self.bpm_values_count - 1))
         stress_index = (rmssd / 50) * 100
-        return max(0, min(100, stress_index))
+
+        # 심박수 데이터 최소 300개일때부터 계산
+        if self.bpm_values_count < 2:
+            return 0.0  # 충분한 데이터가 없음
+        else:
+            return max(0, min(100, stress_index))
 
     def get_stress(self):
         stress_index = self.calculate_stress_index()
         return stress_index
-
+    
     def get_heart_rate(self):
         return self.bpm
 

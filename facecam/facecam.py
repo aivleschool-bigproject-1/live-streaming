@@ -103,7 +103,6 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
 
                 frame_timestamp = video_start_time + datetime.timedelta(seconds=(frame_count / fps))
                 stress = heart_rate_monitor.get_stress()
-                print("streaa: ", stress)
                 detection_info = {
                     'frame': json_frame_count,
                     'timestamp': frame_timestamp.strftime('%Y-%m-%dT%H:%M:%S%z'),
