@@ -58,6 +58,7 @@ class HeartRateMonitor:
 
     def run(self, frame):
         with tf.device(self.device):
+            # print("CUDA 지원 여부: ", dlib.DLIB_USE_CUDA)
             landmarks, face = self.get_landmarks(frame)
             if face is not None:
                 cv2.rectangle(frame, (face.left(), face.top()), (face.right(), face.bottom()), (255, 255, 255), 2)
@@ -67,10 +68,9 @@ class HeartRateMonitor:
             if green_mean is not None:
                 # if not self.initialized:
                 #     self.initialize_buffers(green_mean)  # 초기 버퍼 데이터 설정
-                self.data_buffer.append(green_mean)
-                self.data_buffer.append(green_mean)  # 버퍼에 두 번 추가
-                self.times.append(time.time() - self.t0)
-                self.times.append(time.time() - self.t0)  # 시간도 두 번 추가
+                for i in range(5):      # 버퍼와 시간 스킵한 프레임수만큼 추가
+                    self.data_buffer.append(green_mean)
+                    self.times.append(time.time() - self.t0)
                 if len(self.data_buffer) >= self.buffer_size:
                     self.compute_heart_rate()
 
@@ -117,13 +117,18 @@ class HeartRateMonitor:
     def get_heart_rate(self):
         return self.bpm
 
+    
     def plot_bpm(self, width, height):
+        # Start measuring time for figure creation
+        start_time = time.time()
         fig, ax = plt.subplots(figsize=(width / 100, height / 100), dpi=100)
         fig.patch.set_facecolor('#000000')
         ax.set_facecolor('#000000')
         ax.grid(which='both', color='#1C3554', linestyle='-', linewidth=0.5)
+    
         if len(self.bpm_values) > 1:
             ax.plot(self.bpm_values, color='#00FFFF', linewidth=2)
+    
         ax.set_xlim([0, self.buffer_size])
         ax.set_ylim([0, 200])
         ax.set_xlabel('Time', color='#00FFFF')
@@ -132,13 +137,37 @@ class HeartRateMonitor:
         ax.yaxis.label.set_color('#00FFFF')
         ax.tick_params(axis='x', colors='#00FFFF')
         ax.tick_params(axis='y', colors='#00FFFF')
+    
         for spine in ax.spines.values():
             spine.set_edgecolor('#00FFFF')
-
+    
+        fig_creation_end_time = time.time()
+        print(f"Figure creation time: {fig_creation_end_time - start_time:.4f} seconds")
+    
+        # Start measuring time for canvas drawing
         canvas = FigureCanvas(fig)
         canvas.draw()
+        canvas_end_time = time.time()
+        print(f"Canvas drawing time: {canvas_end_time - fig_creation_end_time:.4f} seconds")
+    
+        # Start measuring time for buffer conversion
         buf = canvas.buffer_rgba()
         graph = np.asarray(buf)
         graph = cv2.cvtColor(graph, cv2.COLOR_RGBA2BGR)
+        buf_conversion_end_time = time.time()
+        print(f"Buffer conversion time: {buf_conversion_end_time - canvas_end_time:.4f} seconds")
+    
         plt.close(fig)
+        total_time = buf_conversion_end_time - start_time
+        print(f"Total plot_bpm time: {total_time:.4f} seconds")
+    
         return graph
+
+    def display_bpm_on_frame(self, frame):
+        bpm_text = f'BPM: {self.bpm:.2f}'
+        text_size = cv2.getTextSize(bpm_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+        text_x = frame.shape[1] - text_size[0] - 10
+        text_y = 30
+        cv2.putText(frame, bpm_text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        return frame
+

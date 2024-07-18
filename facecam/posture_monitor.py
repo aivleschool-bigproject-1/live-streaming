@@ -48,13 +48,14 @@ class PostureMonitor:
                 shoulder_diff = abs(l_shldr_y - r_shldr_y)
                 forward_head_position = abs(nose_y - (l_shldr_y + r_shldr_y) / 2)
 
-                overlay = image.copy()
-                alpha = 0.3
-                cv2.ellipse(overlay, (335, 170), (60, 90), 0, 0, 360, (255, 255, 255), -1)
-                cv2.circle(image, (l_shldr_x, l_shldr_y), 7, self.yellow, -1)
-                cv2.circle(image, (r_shldr_x, r_shldr_y), 7, self.pink, -1)
-                cv2.circle(image, (nose_x, nose_y), 7, self.blue, -1)
-                cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
+                # 자세 레이아웃 그리는 코드
+                # overlay = image.copy()
+                # alpha = 0.3
+                # cv2.ellipse(overlay, (335, 170), (60, 90), 0, 0, 360, (255, 255, 255), -1)
+                # cv2.circle(image, (l_shldr_x, l_shldr_y), 7, self.yellow, -1)
+                # cv2.circle(image, (r_shldr_x, r_shldr_y), 7, self.pink, -1)
+                # cv2.circle(image, (nose_x, nose_y), 7, self.blue, -1)
+                # cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
 
                 angle_text_string = 'Shoulder diff : ' + str(int(shoulder_diff)) + ' degrees'
                 position_text_string = 'Forward Head Position : ' + str(int(forward_head_position)) + ' px'
