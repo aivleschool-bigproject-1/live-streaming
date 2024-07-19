@@ -108,7 +108,8 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
                     'timestamp': frame_timestamp.strftime('%Y-%m-%dT%H:%M:%S%z'),
                     'heart_rate': heart_rate,
                     'stress': stress,  
-                    'posture_status': posture_monitor.get_posture_status()
+                    'posture_status': posture_monitor.get_posture_status(),
+                    'userId': config['userId']
                 }
 
                 bulk_data += json.dumps({"index": {"_index": ES_INDEX}}) + '\n'
