@@ -82,19 +82,6 @@ class PostureMonitor:
                     cv2.line(image, (l_shldr_x, l_shldr_y), (r_shldr_x, r_shldr_y), self.red, 4)
                     cv2.line(image, (nose_x, nose_y), (int((l_shldr_x + r_shldr_x) / 2), int((l_shldr_y + r_shldr_y) / 2)), self.red, 4)
 
-                good_time = (1 / 30) * self.good_frames
-                bad_time = (1 / 30) * self.bad_frames
-
-                if good_time > 0:
-                    time_string_good = 'Good Posture Time : ' + str(round(good_time, 1)) + 's'
-                    cv2.putText(image, time_string_good, (10, h - 20), self.font, 0.9, self.green, 2)
-                else:
-                    time_string_bad = 'Bad Posture Time : ' + str(round(bad_time, 1)) + 's'
-                    cv2.putText(image, time_string_bad, (10, h - 20), self.font, 0.9, self.red, 2)
-
-                if bad_time > 180:
-                    self.sendWarning()
-
             return image
 
     def sendWarning(self):
