@@ -1,4 +1,3 @@
-# main.py
 import os
 import time
 import datetime
@@ -57,6 +56,14 @@ def draw_results(put_text, frame, posture, stress, heart_rate, posture_result):
 
     return output_frame
 
+def maintain_max_files(directory, max_files, ext_media_sequence):
+    files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.ts')]
+    files.sort(key=os.path.getctime)
+    while len(files) > max_files:
+        os.remove(files.pop(0))
+        ext_media_sequence += 1
+    return ext_media_sequence
+
 def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor, posture_monitor, put_text, config):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -92,20 +99,21 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
             if not ret:
                 break
 
-            if frame_count % 3 == 0:
+            if frame_count % 2 == 0:
                 future_heart_rate = executor.submit(predict_heart_rate, frame, heart_rate_monitor)
                 future_posture = executor.submit(predict_posture, frame, posture_monitor)
 
                 heart_rate = future_heart_rate.result()
                 posture_result = future_posture.result()
 
-            
-                frame_timestamp = video_start_time + datetime.timedelta(seconds=(frame_count / fps))
                 stress = heart_rate_monitor.get_stress()
                 posture = "Good Posture" if posture_monitor.get_posture_status() == "Good" else "Bad Posture"
+                previous_heart_rate = heart_rate
+                previous_posture_result = posture_result
+                previous_posture = posture
+                previous_stress = stress
 
-                output_frame = draw_results(put_text, frame, posture, stress, heart_rate, posture_result)
-
+                frame_timestamp = video_start_time + datetime.timedelta(seconds=(frame_count / fps))
                 detection_info = {
                     'frame': json_frame_count,
                     'timestamp': frame_timestamp.strftime('%Y-%m-%dT%H:%M:%S%z'),
@@ -122,19 +130,16 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
                     send_bulk_to_elasticsearch(bulk_data, ES_INDEX)
                     bulk_data = ''
 
-                previous_heart_rate = heart_rate
-                previous_posture_result = posture_result
-                previous_posture = posture
-                previous_stress = stress
                 json_frame_count += 1
             else:
-                if previous_posture_result is not None:
-                    output_frame = draw_results(put_text, frame, previous_posture, previous_stress, previous_heart_rate, previous_posture_result)
-                else:
-                    output_frame = frame
+                heart_rate = previous_heart_rate
+                posture_result = previous_posture_result
+                posture = previous_posture
+                stress = previous_stress
+            if heart_rate:
+                frame = draw_results(put_text, frame, previous_posture, previous_stress, previous_heart_rate, previous_posture_result)
 
-            video_writer.write(output_frame)
-
+            video_writer.write(frame)
             frame_count += 1
 
     if bulk_data:
@@ -156,7 +161,9 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
 
     # Use the calculated video length for EXTINF
     ts_duration = video_length
-    config['extinf_max'] = update_m3u8(final_output_video_path, ts_duration, os.path.join(output_path, 'playlist.m3u8'), config['extinf_max'])
+    config['ext_media_sequence'] = maintain_max_files(output_path, 10, config['ext_media_sequence'])
+    config['extinf_max'] = update_m3u8(final_output_video_path, ts_duration, os.path.join(output_path, 'playlist.m3u8'), config)
+    return config
 
 def get_file_creation_time(file_path):
     creation_time = datetime.datetime.fromtimestamp(os.path.getctime(file_path))
@@ -167,15 +174,10 @@ def get_next_file_to_process(process_path):
     files.sort(key=lambda f: int(f.split('-')[1].split('.')[0]))
     return files[0] if files else None
 
-def maintain_max_files(directory, max_files):
-    files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.ts')]
-    files.sort(key=os.path.getctime)
-    while len(files) > max_files:
-        os.remove(files.pop(0))
-
-def update_m3u8(ts_file, ts_duration, m3u8_filename, extinf_max):
+def update_m3u8(ts_file, ts_duration, m3u8_filename, config):
     # Update the EXTINF max value
-    extinf_max = max(extinf_max, ts_duration)
+    extinf_max = max(config['extinf_max'], ts_duration)
+    ext_media_sequence = config['ext_media_sequence']
     target_duration = math.ceil(extinf_max)
 
     # Extract the ts file name from the full path
@@ -189,7 +191,7 @@ def update_m3u8(ts_file, ts_duration, m3u8_filename, extinf_max):
         playlist_lines = [
             '#EXTM3U\n',
             '#EXT-X-VERSION:3\n',
-            f'#EXT-X-TARGETDURATION:10\n',
+            f'#EXT-X-TARGETDURATION:{target_duration}\n',
             '#EXT-X-MEDIA-SEQUENCE:0\n'
         ]
 
@@ -197,10 +199,12 @@ def update_m3u8(ts_file, ts_duration, m3u8_filename, extinf_max):
     for i, line in enumerate(playlist_lines):
         if line.startswith('#EXT-X-TARGETDURATION'):
             playlist_lines[i] = f'#EXT-X-TARGETDURATION:{target_duration}\n'
+        if line.startswith('#EXT-X-MEDIA-SEQUENCE'):
+            playlist_lines[i] = f'#EXT-X-MEDIA-SEQUENCE:{ext_media_sequence}\n'
             break
 
     # Add the new segment
-    playlist_lines.append(f'#EXTINF:10,\n')
+    playlist_lines.append(f'#EXTINF:{ts_duration},\n')
     playlist_lines.append(f'{ts_file_name}\n')
 
     # Write updated playlist back to file
@@ -217,7 +221,6 @@ def send_bulk_to_elasticsearch(bulk_data, es_index):
 
     try:
         response = requests.post(url, headers=headers, data=bulk_data, auth=HTTPBasicAuth(username, password))
-        # print("response:", response.status_code, response.text)
     except requests.exceptions.SSLError as e:
         print("SSL error:", e)
     except requests.exceptions.ConnectionError as e:
@@ -239,19 +242,18 @@ def main(config_path):
     posture_monitor = PostureMonitor()
     put_text = PutText()
 
-    # Initialize EXTINF max value
     config['extinf_max'] = 0
+    config['ext_media_sequence'] = 0
 
     while True:
         next_file = get_next_file_to_process(process_ts_path)
         if next_file:
             video_path = os.path.join(process_ts_path, next_file)
             video_start_time = time.time()
-            detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, heart_rate_monitor, posture_monitor, put_text, config)
+            config = detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, heart_rate_monitor, posture_monitor, put_text, config)
             video_end_time = time.time()
             os.remove(video_path)
 
-            maintain_max_files(processed_ts_path, 30)
             print(f"Total processing time for {video_path}: {video_end_time - video_start_time:.4f} seconds")
         else:
             time.sleep(5)
