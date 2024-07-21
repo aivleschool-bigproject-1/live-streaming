@@ -13,6 +13,7 @@ from requests.auth import HTTPBasicAuth
 from collections import deque
 from heart_rate_monitor import HeartRateMonitor
 from posture_monitor import PostureMonitor
+from put_text import PutText
 import tensorflow as tf
 import math
 
@@ -47,19 +48,16 @@ def predict_posture(frame, posture_monitor):
     result = posture_monitor.run(frame)
     return result
 
-def draw_results(frame, posture_result, heart_rate_monitor):
+def draw_results(put_text, frame, posture, stress, heart_rate, posture_result):
     output_frame = frame.copy()  # 기존 프레임을 복사하여 시작
 
     if posture_result is not None:
         output_frame[:, :frame.shape[1]] = posture_result
-
-    output_frame = heart_rate_monitor.display_bpm_on_frame(output_frame)
+    output_frame = put_text.display_log_on_frame(output_frame, posture, stress, heart_rate)
 
     return output_frame
 
-
-
-def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor, posture_monitor, config):
+def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor, posture_monitor, put_text, config):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -83,8 +81,10 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
     json_frame_count = 1
     bulk_data = ''
 
-    previous_heart_rate = None
     previous_posture_result = None
+    previous_posture = None
+    previous_heart_rate = None
+    previous_stress = None
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         while cap.isOpened():
@@ -99,10 +99,13 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
                 heart_rate = future_heart_rate.result()
                 posture_result = future_posture.result()
 
-                output_frame = draw_results(frame, posture_result, heart_rate_monitor)
-
+            
                 frame_timestamp = video_start_time + datetime.timedelta(seconds=(frame_count / fps))
                 stress = heart_rate_monitor.get_stress()
+                posture = "Good Posture" if posture_monitor.get_posture_status() == "Good" else "Bad Posture"
+
+                output_frame = draw_results(put_text, frame, posture, stress, heart_rate, posture_result)
+
                 detection_info = {
                     'frame': json_frame_count,
                     'timestamp': frame_timestamp.strftime('%Y-%m-%dT%H:%M:%S%z'),
@@ -121,10 +124,12 @@ def detect_and_save_video(video_path, output_path, tmp_path, heart_rate_monitor,
 
                 previous_heart_rate = heart_rate
                 previous_posture_result = posture_result
+                previous_posture = posture
+                previous_stress = stress
                 json_frame_count += 1
             else:
                 if previous_posture_result is not None:
-                    output_frame = draw_results(frame, previous_posture_result, heart_rate_monitor)
+                    output_frame = draw_results(put_text, frame, previous_posture, previous_stress, previous_heart_rate, previous_posture_result)
                 else:
                     output_frame = frame
 
@@ -184,7 +189,7 @@ def update_m3u8(ts_file, ts_duration, m3u8_filename, extinf_max):
         playlist_lines = [
             '#EXTM3U\n',
             '#EXT-X-VERSION:3\n',
-            f'#EXT-X-TARGETDURATION:{target_duration}\n',
+            f'#EXT-X-TARGETDURATION:10\n',
             '#EXT-X-MEDIA-SEQUENCE:0\n'
         ]
 
@@ -195,7 +200,7 @@ def update_m3u8(ts_file, ts_duration, m3u8_filename, extinf_max):
             break
 
     # Add the new segment
-    playlist_lines.append(f'#EXTINF:{ts_duration},\n')
+    playlist_lines.append(f'#EXTINF:10,\n')
     playlist_lines.append(f'{ts_file_name}\n')
 
     # Write updated playlist back to file
@@ -232,6 +237,7 @@ def main(config_path):
 
     heart_rate_monitor = HeartRateMonitor()
     posture_monitor = PostureMonitor()
+    put_text = PutText()
 
     # Initialize EXTINF max value
     config['extinf_max'] = 0
@@ -241,7 +247,7 @@ def main(config_path):
         if next_file:
             video_path = os.path.join(process_ts_path, next_file)
             video_start_time = time.time()
-            detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, heart_rate_monitor, posture_monitor, config)
+            detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, heart_rate_monitor, posture_monitor, put_text, config)
             video_end_time = time.time()
             os.remove(video_path)
 

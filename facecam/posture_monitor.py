@@ -1,4 +1,3 @@
-# posture_monitor.py
 import cv2
 import mediapipe as mp
 import math as m
@@ -48,37 +47,15 @@ class PostureMonitor:
                 shoulder_diff = abs(l_shldr_y - r_shldr_y)
                 forward_head_position = abs(nose_y - (l_shldr_y + r_shldr_y) / 2)
 
-                # 자세 레이아웃 그리는 코드
-                # overlay = image.copy()
-                # alpha = 0.3
-                # cv2.ellipse(overlay, (335, 170), (60, 90), 0, 0, 360, (255, 255, 255), -1)
-                # cv2.circle(image, (l_shldr_x, l_shldr_y), 7, self.yellow, -1)
-                # cv2.circle(image, (r_shldr_x, r_shldr_y), 7, self.pink, -1)
-                # cv2.circle(image, (nose_x, nose_y), 7, self.blue, -1)
-                # cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
-
-                angle_text_string = 'Shoulder diff : ' + str(int(shoulder_diff)) + ' degrees'
-                position_text_string = 'Forward Head Position : ' + str(int(forward_head_position)) + ' px'
-
                 if shoulder_diff < 50 and forward_head_position > 95:
                     self.bad_frames = 0
                     self.good_frames += 1
-                    
-                    cv2.putText(image, angle_text_string, (10, 30), self.font, 0.9, self.light_green, 2)
-                    cv2.putText(image, position_text_string, (10, 60), self.font, 0.9, self.light_green, 2)
-                    cv2.putText(image, 'Good Posture', (10, 90), self.font, 0.9, self.light_green, 2)
-
                     cv2.line(image, (l_shldr_x, l_shldr_y), (r_shldr_x, r_shldr_y), self.green, 4)
                     cv2.line(image, (nose_x, nose_y), (int((l_shldr_x + r_shldr_x) / 2), int((l_shldr_y + r_shldr_y) / 2)), self.green, 4)
 
                 else:
                     self.good_frames = 0
                     self.bad_frames += 1
-
-                    cv2.putText(image, angle_text_string, (10, 30), self.font, 0.9, self.red, 2)
-                    cv2.putText(image, position_text_string, (10, 60), self.font, 0.9, self.red, 2)
-                    cv2.putText(image, 'Bad Posture', (10, 90), self.font, 0.9, self.red, 2)
-
                     cv2.line(image, (l_shldr_x, l_shldr_y), (r_shldr_x, r_shldr_y), self.red, 4)
                     cv2.line(image, (nose_x, nose_y), (int((l_shldr_x + r_shldr_x) / 2), int((l_shldr_y + r_shldr_y) / 2)), self.red, 4)
 

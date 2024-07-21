@@ -64,8 +64,6 @@ class HeartRateMonitor:
         with tf.device(self.device):
             # print("CUDA 지원 여부: ", dlib.DLIB_USE_CUDA)
             landmarks, face = self.get_landmarks(frame)
-            if face is not None:
-                cv2.rectangle(frame, (face.left(), face.top()), (face.right(), face.bottom()), (255, 255, 255), 2)
             roi = self.get_forehead_roi(landmarks, frame)
             green_mean = self.extract_green_channel_mean(roi)
 
@@ -141,19 +139,3 @@ class HeartRateMonitor:
     
     def get_heart_rate(self):
         return self.bpm
-
-    def display_bpm_on_frame(self, frame):
-        bpm_text = f'BPM: {self.bpm:.2f}'
-        text_size = cv2.getTextSize(bpm_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
-        text_x = frame.shape[1] - text_size[0] - 10
-        text_y = 30
-        cv2.putText(frame, bpm_text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-        stress_index = self.calculate_stress_index()
-        stress_text = f'Stress: {stress_index:.2f}'
-        stress_text_size = cv2.getTextSize(stress_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
-        stress_text_x = frame.shape[1] - stress_text_size[0] - 10
-        stress_text_y = text_y + 30
-        cv2.putText(frame, stress_text, (stress_text_x, stress_text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-        return frame
