@@ -51,6 +51,14 @@ def draw_bounding_boxes(frame, outputs):
         cv2.rectangle(frame, (x1, label_ymin - label_size[1] - 10), (x1 + label_size[0], label_ymin + base_line - 10), (0, 255, 0), cv2.FILLED)
         cv2.putText(frame, label, (x1, label_ymin - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
 
+def maintain_max_files(directory, max_files, ext_media_sequence):
+    files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.ts')]
+    files.sort(key=os.path.getctime)
+    while len(files) > max_files:
+        os.remove(files.pop(0))
+        ext_media_sequence += 1
+    return ext_media_sequence
+
 def detect_and_save_video(video_path, output_path, tmp_path, model, target_classes, config):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -141,7 +149,9 @@ def detect_and_save_video(video_path, output_path, tmp_path, model, target_class
 
     # Use the calculated video length for EXTINF
     ts_duration = video_length
-    config['extinf_max'] = update_m3u8(final_output_video_path, ts_duration, os.path.join(output_path, 'playlist.m3u8'), config['extinf_max'])
+    config['ext_media_sequence'] = maintain_max_files(output_path, 10, config['ext_media_sequence'])
+    config['extinf_max'] = update_m3u8(final_output_video_path, ts_duration, os.path.join(output_path, 'playlist.m3u8'), config)
+    return config
 
 def get_file_creation_time(file_path):
     creation_time = datetime.datetime.fromtimestamp(os.path.getctime(file_path))
@@ -152,15 +162,10 @@ def get_next_file_to_process(process_path):
     files.sort(key=lambda f: int(f.split('-')[1].split('.')[0]))
     return files[0] if files else None
 
-def maintain_max_files(directory, max_files):
-    files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.ts')]
-    files.sort(key=os.path.getctime)
-    while len(files) > max_files:
-        os.remove(files.pop(0))
-
-def update_m3u8(ts_file, ts_duration, m3u8_filename, extinf_max):
+def update_m3u8(ts_file, ts_duration, m3u8_filename, config):
     # Update the EXTINF max value
-    extinf_max = max(extinf_max, ts_duration)
+    extinf_max = max(config['extinf_max'], ts_duration)
+    ext_media_sequence = config['ext_media_sequence']
     target_duration = math.ceil(extinf_max)
 
     # Extract the ts file name from the full path
@@ -175,13 +180,15 @@ def update_m3u8(ts_file, ts_duration, m3u8_filename, extinf_max):
             '#EXTM3U\n',
             '#EXT-X-VERSION:3\n',
             f'#EXT-X-TARGETDURATION:{target_duration}\n',
-            '#EXT-X-MEDIA-SEQUENCE:0\n'
+            f'#EXT-X-MEDIA-SEQUENCE:0\n'
         ]
 
     # Update TARGETDURATION in the header
     for i, line in enumerate(playlist_lines):
         if line.startswith('#EXT-X-TARGETDURATION'):
             playlist_lines[i] = f'#EXT-X-TARGETDURATION:{target_duration}\n'
+        if line.startswith('#EXT-X-MEDIA-SEQUENCE'):
+            playlist_lines[i] = f'#EXT-X-MEDIA-SEQUENCE:{ext_media_sequence}\n'
             break
 
     # Add the new segment

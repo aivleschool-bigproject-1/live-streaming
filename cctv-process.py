@@ -65,6 +65,14 @@ def draw_segmentation(frame, outputs, masks):
             if 0 <= m[1] < height and 0 <= m[0] < width:
                 frame[m[1], m[0]] = [255, 0, 255]
 
+def maintain_max_files(directory, max_files, ext_media_sequence):
+    files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.ts')]
+    files.sort(key=os.path.getctime)
+    while len(files) > max_files:
+        os.remove(files.pop(0))
+        ext_media_sequence += 1
+    return ext_media_sequence
+
 def detect_and_save_video(video_path, output_path, tmp_path, models, target_classes, config):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -98,7 +106,7 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
         if not ret:
             break
 
-        if frame_count % 2 == 0:  # Process every second frame
+        if frame_count % 5 == 0:  # Process every second frame
             futures = []
             for model in models:
                 if 'fire_seg_results.pt' in model['path']:
@@ -171,7 +179,9 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
 
     # Use the calculated video length for EXTINF
     ts_duration = video_length
-    config['extinf_max'] = update_m3u8(final_output_video_path, ts_duration, os.path.join(output_path, 'playlist.m3u8'), config['extinf_max'])
+    config['ext_media_sequence'] = maintain_max_files(output_path, 10, config['ext_media_sequence'])
+    config['extinf_max'] = update_m3u8(final_output_video_path, ts_duration, os.path.join(output_path, 'playlist.m3u8'), config)
+    return config
 
 def get_file_creation_time(file_path):
     creation_time = datetime.datetime.fromtimestamp(os.path.getctime(file_path))
@@ -182,15 +192,11 @@ def get_next_file_to_process(process_path):
     files.sort(key=lambda f: int(f.split('-')[1].split('.')[0]))
     return files[0] if files else None
 
-def maintain_max_files(directory, max_files):
-    files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.ts')]
-    files.sort(key=os.path.getctime)
-    while len(files) > max_files:
-        os.remove(files.pop(0))
 
-def update_m3u8(ts_file, ts_duration, m3u8_filename, extinf_max):
+def update_m3u8(ts_file, ts_duration, m3u8_filename, config):
     # Update the EXTINF max value
-    extinf_max = max(extinf_max, ts_duration)
+    extinf_max = max(config['extinf_max'], ts_duration)
+    ext_media_sequence = config['ext_media_sequence']
     target_duration = math.ceil(extinf_max)
 
     # Extract the ts file name from the full path
@@ -212,6 +218,8 @@ def update_m3u8(ts_file, ts_duration, m3u8_filename, extinf_max):
     for i, line in enumerate(playlist_lines):
         if line.startswith('#EXT-X-TARGETDURATION'):
             playlist_lines[i] = f'#EXT-X-TARGETDURATION:{target_duration}\n'
+        if line.startswith('#EXT-X-MEDIA-SEQUENCE'):
+            playlist_lines[i] = f'#EXT-X-MEDIA-SEQUENCE:{ext_media_sequence}\n'
             break
 
     # Add the new segment
@@ -257,15 +265,16 @@ def main(config_path):
 
     # Initialize EXTINF max value
     config['extinf_max'] = 0
+    config['ext_media_sequence'] = 0
 
     while True:
         next_file = get_next_file_to_process(process_ts_path)
         if next_file:
             video_path = os.path.join(process_ts_path, next_file)
-            detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, models, target_classes, config)
+            config = detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, models, target_classes, config)
             os.remove(video_path)  # Remove the processed file
 
-            maintain_max_files(processed_ts_path, 30)
+            
         else:
             time.sleep(5)  # Wait for a short while before checking again
 
