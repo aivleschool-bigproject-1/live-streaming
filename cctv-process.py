@@ -47,6 +47,35 @@ def predict_model(frame, model, target_classes, confidence_threshold):
             segmentation_masks = results[0].masks.xy
 
     return output, class_counts, segmentation_masks
+def draw_rounded_rectangle(frame, top_left, bottom_right, color, radius):
+    x1, y1 = top_left
+    x2, y2 = bottom_right
+    thickness = -1  # Fill the rectangle
+
+    # Draw the four rounded corners
+    cv2.circle(frame, (x1 + radius, y1 + radius), radius, color, thickness)
+    cv2.circle(frame, (x2 - radius, y1 + radius), radius, color, thickness)
+    cv2.circle(frame, (x1 + radius, y2 - radius), radius, color, thickness)
+    cv2.circle(frame, (x2 - radius, y2 - radius), radius, color, thickness)
+
+    # Draw the four edges
+    cv2.rectangle(frame, (x1 + radius, y1), (x2 - radius, y2), color, thickness)
+    cv2.rectangle(frame, (x1, y1 + radius), (x2, y2 - radius), color, thickness)
+
+def draw_live_text(frame):
+    # Define rectangle properties
+    rect_x, rect_y, rect_w, rect_h = 15, 15, 120, 40  # Position and size of the rectangle
+    radius = 10  # Radius for the corners
+    color = (128, 128, 128)  # Gray color for the rectangle
+
+    # Draw rounded rectangle
+    draw_rounded_rectangle(frame, (rect_x, rect_y), (rect_x + rect_w, rect_y + rect_h), color, radius)
+
+    # Draw the red dot and LIVE text on top of the rectangle
+    cv2.circle(frame, (rect_x + 15, rect_y + 20), 10, (0, 0, 255), -1)  # Red dot
+    cv2.putText(frame, 'LIVE', (rect_x + 35, rect_y + 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)  # LIVE text in white
+
+    return frame
 
 def draw_bounding_boxes(frame, outputs):
     for (x1, y1, x2, y2, label) in outputs:
@@ -157,6 +186,7 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
                 else:
                     draw_bounding_boxes(frame, frame_detections)
 
+            draw_live_text(frame)
             video_writer.write(frame)
             frame_count += 1
 
