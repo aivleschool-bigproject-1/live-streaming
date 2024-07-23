@@ -74,114 +74,118 @@ def maintain_max_files(directory, max_files, ext_media_sequence):
     return ext_media_sequence
 
 def detect_and_save_video(video_path, output_path, tmp_path, models, target_classes, config):
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    video_length = total_frames / fps if fps > 0 else 0
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    try:
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_length = total_frames / fps if fps > 0 else 0
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 
-    if not cap.isOpened():
-        print("Error opening video file")
-        return
+        if not cap.isOpened():
+            print("Error opening video file")
+            return
 
-    temp_output_video_path = os.path.join(tmp_path, f"{config['config_name']}_temp_video.mp4")
-    timestamp = get_timestamp()
-    final_output_video_path = os.path.join(output_path, f'{timestamp}-processed.ts')
-    video_writer = cv2.VideoWriter(temp_output_video_path, fourcc, fps, (width, height))
+        temp_output_video_path = os.path.join(tmp_path, f"{config['config_name']}_temp_video.mp4")
+        timestamp = get_timestamp()
+        final_output_video_path = os.path.join(output_path, f'{timestamp}-processed.ts')
+        video_writer = cv2.VideoWriter(temp_output_video_path, fourcc, fps, (width, height))
 
-    video_start_time = get_file_creation_time(video_path)
+        video_start_time = get_file_creation_time(video_path)
 
-    frame_count = 0
-    json_frame_count = 1  # Initialize JSON frame count
-    previous_outputs = []
-    previous_class_counts = {cls: 0 for cls in target_classes}
-    bulk_data = ''
-    
-    es_index = 'industrial-cctv' if config['config_name'] == 'industrial_config' else 'office-cctv'
+        frame_count = 0
+        json_frame_count = 1  # Initialize JSON frame count
+        previous_outputs = []
+        previous_class_counts = {cls: 0 for cls in target_classes}
+        bulk_data = ''
+        
+        es_index = 'industrial-cctv' if config['config_name'] == 'industrial_config' else 'office-cctv'
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        if frame_count % 5 == 0:  # Process every second frame
-            futures = []
-            for model in models:
-                if 'fire_seg_results.pt' in model['path']:
-                    futures.append(predict_model(frame, model, target_classes, 0.3))
-                else:
-                    futures.append(predict_model(frame, model, target_classes, 0.55))
-                    
-            frame_detections = []
-            frame_class_counts = {cls: 0 for cls in target_classes}
-            segmentation_masks = []
-            for i, future in enumerate(futures):
-                outputs, class_counts, masks = future
-                frame_detections.extend(outputs)
-                for cls, count in class_counts.items():
-                    frame_class_counts[cls] += count
-                if masks:
-                    segmentation_masks.extend(masks)
-            previous_outputs = frame_detections
-            previous_class_counts = frame_class_counts
+            if frame_count % 5 == 0:  # Process every second frame
+                futures = []
+                for model in models:
+                    if 'fire_seg_results.pt' in model['path']:
+                        futures.append(predict_model(frame, model, target_classes, 0.3))
+                    else:
+                        futures.append(predict_model(frame, model, target_classes, 0.55))
+                        
+                frame_detections = []
+                frame_class_counts = {cls: 0 for cls in target_classes}
+                segmentation_masks = []
+                for i, future in enumerate(futures):
+                    outputs, class_counts, masks = future
+                    frame_detections.extend(outputs)
+                    for cls, count in class_counts.items():
+                        frame_class_counts[cls] += count
+                    if masks:
+                        segmentation_masks.extend(masks)
+                previous_outputs = frame_detections
+                previous_class_counts = frame_class_counts
 
-            frame_timestamp = video_start_time + datetime.timedelta(seconds=(frame_count / fps))
-            detection_info = {
-                'frame': json_frame_count,
-                'timestamp': frame_timestamp.strftime('%Y-%m-%dT%H:%M:%S%z'),
-                'detections': frame_class_counts
-            }
-            if config['config_name'] == 'industrial_config':
-                detection_info['min_required_personnel'] = config['min_required_personnel']
-            
-            # Add to bulk data
-            bulk_data += json.dumps({"index": {"_index": es_index}}) + '\n'
-            bulk_data += json.dumps(detection_info) + '\n'
+                frame_timestamp = video_start_time + datetime.timedelta(seconds=(frame_count / fps))
+                detection_info = {
+                    'frame': json_frame_count,
+                    'timestamp': frame_timestamp.strftime('%Y-%m-%dT%H:%M:%S%z'),
+                    'detections': frame_class_counts
+                }
+                if config['config_name'] == 'industrial_config':
+                    detection_info['min_required_personnel'] = config['min_required_personnel']
+                
+                # Add to bulk data
+                bulk_data += json.dumps({"index": {"_index": es_index}}) + '\n'
+                bulk_data += json.dumps(detection_info) + '\n'
 
-            # Check if bulk_data size exceeds MAX_BULK_SIZE
-            if len(bulk_data.encode('utf-8')) > MAX_BULK_SIZE:
-                send_bulk_to_elasticsearch(bulk_data, es_index)
-                bulk_data = ''
+                # Check if bulk_data size exceeds MAX_BULK_SIZE
+                if len(bulk_data.encode('utf-8')) > MAX_BULK_SIZE:
+                    send_bulk_to_elasticsearch(bulk_data, es_index)
+                    bulk_data = ''
 
-            json_frame_count += 1  # Increment JSON frame count
-        else:
-            frame_detections = previous_outputs
-            frame_class_counts = previous_class_counts
-
-        if frame_detections:
-            if 'fire_seg_results.pt' in models[0]['path']:
-                draw_segmentation(frame, frame_detections, segmentation_masks)
+                json_frame_count += 1  # Increment JSON frame count
             else:
-                draw_bounding_boxes(frame, frame_detections)
+                frame_detections = previous_outputs
+                frame_class_counts = previous_class_counts
 
-        video_writer.write(frame)
-        frame_count += 1
+            if frame_detections:
+                if 'fire_seg_results.pt' in models[0]['path']:
+                    draw_segmentation(frame, frame_detections, segmentation_masks)
+                else:
+                    draw_bounding_boxes(frame, frame_detections)
 
-    # Send any remaining data in the buffer
-    if bulk_data:
-        send_bulk_to_elasticsearch(bulk_data, es_index)
+            video_writer.write(frame)
+            frame_count += 1
 
-    video_writer.release()
-    cap.release()
+        # Send any remaining data in the buffer
+        if bulk_data:
+            send_bulk_to_elasticsearch(bulk_data, es_index)
 
-    convert_command = [
-        'ffmpeg',
-        '-i', temp_output_video_path,
-        '-c:v', 'libx264',
-        '-c:a', 'copy',
-        '-f', 'mpegts',
-        final_output_video_path
-    ]
-    subprocess.run(convert_command, check=True)
-    os.remove(temp_output_video_path)
+        video_writer.release()
+        cap.release()
 
-    # Use the calculated video length for EXTINF
-    ts_duration = video_length
-    config['ext_media_sequence'] = maintain_max_files(output_path, 10, config['ext_media_sequence'])
-    config['extinf_max'] = update_m3u8(final_output_video_path, ts_duration, os.path.join(output_path, 'playlist.m3u8'), config)
-    return config
+        convert_command = [
+            'ffmpeg',
+            '-i', temp_output_video_path,
+            '-c:v', 'libx264',
+            '-c:a', 'copy',
+            '-f', 'mpegts',
+            final_output_video_path
+        ]
+        subprocess.run(convert_command, check=True)
+        os.remove(temp_output_video_path)
+
+        # Use the calculated video length for EXTINF
+        ts_duration = video_length
+        config['ext_media_sequence'] = maintain_max_files(output_path, 10, config['ext_media_sequence'])
+        config['extinf_max'] = update_m3u8(final_output_video_path, ts_duration, os.path.join(output_path, 'playlist.m3u8'), config)
+        return config
+    except Exception as e:
+        print(f"An error occurred during video processing: {e}")
+        return config
 
 def get_file_creation_time(file_path):
     creation_time = datetime.datetime.fromtimestamp(os.path.getctime(file_path))
@@ -191,7 +195,6 @@ def get_next_file_to_process(process_path):
     files = [f for f in os.listdir(process_path) if f.endswith('.ts')]
     files.sort(key=lambda f: int(f.split('-')[1].split('.')[0]))
     return files[0] if files else None
-
 
 def update_m3u8(ts_file, ts_duration, m3u8_filename, config):
     # Update the EXTINF max value
@@ -232,7 +235,6 @@ def update_m3u8(ts_file, ts_duration, m3u8_filename, config):
 
     return extinf_max
 
-
 def send_bulk_to_elasticsearch(bulk_data, es_index):
     url = f'https://ea86ace4539b432f84fc0f19c4c0c586.ap-northeast-2.aws.elastic-cloud.com/{es_index}/_bulk'
     headers = {'Content-Type': 'application/x-ndjson'}
@@ -268,15 +270,17 @@ def main(config_path):
     config['ext_media_sequence'] = 0
 
     while True:
-        next_file = get_next_file_to_process(process_ts_path)
-        if next_file:
-            video_path = os.path.join(process_ts_path, next_file)
-            config = detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, models, target_classes, config)
-            os.remove(video_path)  # Remove the processed file
-
-            
-        else:
-            time.sleep(5)  # Wait for a short while before checking again
+        try:
+            next_file = get_next_file_to_process(process_ts_path)
+            if next_file:
+                video_path = os.path.join(process_ts_path, next_file)
+                config = detect_and_save_video(video_path, processed_ts_path, TEMP_OUTPUT_PATH, models, target_classes, config)
+                os.remove(video_path)  # Remove the processed file
+            else:
+                time.sleep(5)  # Wait for a short while before checking again
+        except Exception as e:
+            print(f"An error occurred in the main loop: {e}")
+            time.sleep(5)  # Wait a bit before retrying to avoid rapid failure loops
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='CCTV Video Processing')
