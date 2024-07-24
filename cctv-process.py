@@ -14,7 +14,7 @@ from requests.auth import HTTPBasicAuth
 import math
 
 TEMP_OUTPUT_PATH = os.path.expanduser('~/codes/ts-processed')
-MODEL_PATHS = ['fire_seg_results.pt', 'v8_nano_results.pt']
+MODEL_PATHS = ['fire_seg_results.pt', 'v10_results_200epochs.pt']
 MAX_BULK_SIZE = 90 * 1024 * 1024  # 90MB
 
 def get_timestamp():
