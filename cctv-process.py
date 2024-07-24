@@ -47,6 +47,7 @@ def predict_model(frame, model, target_classes, confidence_threshold):
             segmentation_masks = results[0].masks.xy
 
     return output, class_counts, segmentation_masks
+
 def draw_rounded_rectangle(frame, top_left, bottom_right, color, radius):
     x1, y1 = top_left
     x2, y2 = bottom_right
@@ -131,6 +132,8 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
         
         es_index = 'industrial-cctv' if config['config_name'] == 'industrial_config' else 'office-cctv'
 
+        executor = ThreadPoolExecutor(max_workers=len(models))
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -140,15 +143,15 @@ def detect_and_save_video(video_path, output_path, tmp_path, models, target_clas
                 futures = []
                 for model in models:
                     if 'fire_seg_results.pt' in model['path']:
-                        futures.append(predict_model(frame, model, target_classes, 0.3))
+                        futures.append(executor.submit(predict_model, frame, model, target_classes, 0.3))
                     else:
-                        futures.append(predict_model(frame, model, target_classes, 0.55))
+                        futures.append(executor.submit(predict_model, frame, model, target_classes, 0.55))
                         
                 frame_detections = []
                 frame_class_counts = {cls: 0 for cls in target_classes}
                 segmentation_masks = []
-                for i, future in enumerate(futures):
-                    outputs, class_counts, masks = future
+                for future in futures:
+                    outputs, class_counts, masks = future.result()
                     frame_detections.extend(outputs)
                     for cls, count in class_counts.items():
                         frame_class_counts[cls] += count
