@@ -1,6 +1,8 @@
 import cv2
 
 class PutText:
+    def __init__(self):
+        self.red = (50, 50, 255)
     # 알파 블렌딩 함수
     def alpha_blend(self, frame_section, icon):
         alpha_s = icon[:, :, 3] / 255.0
@@ -19,7 +21,10 @@ class PutText:
         # 텍스트 위치 계산 (아이콘 중앙에 맞춤)
         text_x = x + icon_width + 10
         text_y = y + icon_height // 2 + 10
-        cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        if text == "Bad Posture":
+            cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, self.red, 2)
+        else:
+            cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
     def display_log_on_frame(self, frame, posture_text, stress_index, bpm):
     
@@ -35,7 +40,7 @@ class PutText:
     
         bpm_text = f'BPM: {bpm:.2f}'
         stress_text = f'Stress: {stress_index:.2f}'
-        posture_text = 'Good Posture'
+        posture_text = posture_text
     
         # 프레임 크기 및 아이콘 배치 위치 정의
         frame_height, frame_width = 720, 1280

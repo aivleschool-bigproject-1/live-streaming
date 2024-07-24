@@ -47,7 +47,7 @@ class PostureMonitor:
                 shoulder_diff = abs(l_shldr_y - r_shldr_y)
                 forward_head_position = abs(nose_y - (l_shldr_y + r_shldr_y) / 2)
 
-                if shoulder_diff < 50 and forward_head_position > 95:
+                if shoulder_diff < 50 and forward_head_position > 300:
                     self.bad_frames = 0
                     self.good_frames += 1
                     cv2.line(image, (l_shldr_x, l_shldr_y), (r_shldr_x, r_shldr_y), self.green, 4)
